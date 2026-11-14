@@ -1,0 +1,1447 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover" />
+  <title>SG Cycle Explorer PWA</title>
+  <meta name="description" content="Track your Singapore cycling exploration across NParks Park Connectors (PCN) and LTA Cycling Paths with live GeoJSON network overlays." />
+  <meta name="theme-color" content="#061214" />
+  <meta name="color-scheme" content="dark" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="SG Cycle" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="format-detection" content="telephone=no" />
+  <link rel="apple-touch-icon" id="appleIcon" href="" />
+  <link rel="icon" id="favIcon" href="" />
+
+  <!-- Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@500;700&family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet" />
+
+  <!-- Leaflet -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            display: ['"Space Grotesk"', 'system-ui', 'sans-serif'],
+            mono: ['"JetBrains Mono"', 'ui-monospace', 'monospace'],
+          },
+        },
+      },
+    };
+  </script>
+
+  <!-- Inline PWA manifest + generated cycling icon -->
+  <script>
+    (function () {
+      function makeIcon(size) {
+        var c = document.createElement('canvas');
+        c.width = c.height = size;
+        var x = c.getContext('2d');
+        var s = size / 512;
+        var g = x.createLinearGradient(0, 0, size, size);
+        g.addColorStop(0, '#0f292e');
+        g.addColorStop(1, '#061214');
+        x.fillStyle = g;
+        x.fillRect(0, 0, size, size);
+        x.lineCap = 'round';
+        x.lineJoin = 'round';
+
+        // Glowing PCN & Cycling Path trail
+        x.shadowColor = '#10b981';
+        x.shadowBlur = 40 * s;
+        x.strokeStyle = '#34d399';
+        x.lineWidth = 34 * s;
+        x.beginPath();
+        x.moveTo(96 * s, 380 * s);
+        x.bezierCurveTo(170 * s, 250 * s, 250 * s, 410 * s, 320 * s, 270 * s);
+        x.bezierCurveTo(360 * s, 190 * s, 390 * s, 160 * s, 420 * s, 130 * s);
+        x.stroke();
+        x.shadowBlur = 0;
+
+        // Start / End nodes
+        x.fillStyle = '#38bdf8';
+        x.beginPath();
+        x.arc(96 * s, 380 * s, 34 * s, 0, Math.PI * 2);
+        x.fill();
+
+        x.fillStyle = '#ffffff';
+        x.beginPath();
+        x.arc(420 * s, 130 * s, 30 * s, 0, Math.PI * 2);
+        x.fill();
+        return c.toDataURL('image/png');
+      }
+      try {
+        var i192 = makeIcon(192), i512 = makeIcon(512), i180 = makeIcon(180);
+        document.getElementById('appleIcon').href = i180;
+        document.getElementById('favIcon').href = i192;
+        var base = location.href.split('#')[0].split('?')[0];
+        var scope = base.substring(0, base.lastIndexOf('/') + 1);
+        var manifest = {
+          name: 'SG Cycle Explorer PWA',
+          short_name: 'SG Cycle',
+          description: 'Track Singapore cycling coverage across NParks PCN and LTA Cycling Paths.',
+          start_url: base,
+          scope: scope,
+          display: 'standalone',
+          orientation: 'any',
+          background_color: '#061214',
+          theme_color: '#061214',
+          icons: [
+            { src: i192, sizes: '192x192', type: 'image/png', purpose: 'any maskable' },
+            { src: i512, sizes: '512x512', type: 'image/png', purpose: 'any maskable' }
+          ]
+        };
+        var link = document.createElement('link');
+        link.rel = 'manifest';
+        link.href = 'data:application/manifest+json;charset=utf-8,' + encodeURIComponent(JSON.stringify(manifest));
+        document.head.appendChild(link);
+      } catch (e) { /* non-fatal */ }
+    })();
+  </script>
+
+  <style>
+    :root {
+      --sat: env(safe-area-inset-top, 0px);
+      --sab: env(safe-area-inset-bottom, 0px);
+      --sal: env(safe-area-inset-left, 0px);
+      --sar: env(safe-area-inset-right, 0px);
+      --app-h: 100vh;
+      --bar-h: 88px;
+    }
+    html, body {
+      margin: 0; padding: 0;
+      width: 100%;
+      height: 100%;
+      height: var(--app-h);
+      height: 100dvh;
+      overflow: hidden;
+      overscroll-behavior: none;
+      background: #061214;
+      color: #e2e8f0;
+      font-family: 'Space Grotesk', system-ui, -apple-system, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -webkit-tap-highlight-color: transparent;
+      -webkit-text-size-adjust: 100%;
+    }
+    body { position: fixed; inset: 0; }
+
+    #map {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      width: 100%;
+      height: 100vh;
+      height: var(--app-h);
+      height: 100dvh;
+      z-index: 0;
+      background: #061214;
+      touch-action: none;
+    }
+    .leaflet-container { font-family: inherit; background: #061214; }
+    .leaflet-bottom { bottom: calc(var(--bar-h) + var(--sab) + 8px); }
+    .leaflet-control-attribution {
+      background: rgba(6, 18, 20, .78) !important;
+      color: #94a3b8 !important;
+      font-size: 9px !important;
+      border-radius: 6px 0 0 6px;
+      backdrop-filter: blur(6px);
+    }
+    .leaflet-control-attribution a { color: #34d399 !important; }
+
+    /* Glowing completed cycling routes */
+    .leaflet-rides-pane svg { filter: drop-shadow(0 0 4px rgba(251, 191, 36, .9)); }
+    .leaflet-live-pane svg { filter: drop-shadow(0 0 4px rgba(56, 189, 248, .9)); }
+
+    .leaflet-popup-content-wrapper, .leaflet-popup-tip {
+      background: #0f2428; color: #e2e8f0;
+      border: 1px solid rgba(52, 211, 153, .35);
+      box-shadow: 0 10px 30px rgba(0,0,0,.6);
+    }
+    .leaflet-popup-content { margin: 10px 14px; font-size: 12px; line-height: 1.45; }
+    .leaflet-container a.leaflet-popup-close-button { color: #94a3b8; }
+
+    /* Cyclist position marker */
+    .user-dot {
+      width: 18px; height: 18px; border-radius: 50%;
+      background: #34d399; border: 3px solid #fff;
+      box-shadow: 0 0 0 0 rgba(52, 211, 153, .7);
+      animation: pulseG 1.8s infinite;
+    }
+    @keyframes pulseG {
+      0% { box-shadow: 0 0 0 0 rgba(52,211,153,.75); }
+      70% { box-shadow: 0 0 0 18px rgba(52,211,153,0); }
+      100% { box-shadow: 0 0 0 0 rgba(52,211,153,0); }
+    }
+
+    .glass {
+      background: linear-gradient(180deg, rgba(15, 36, 40, .88), rgba(6, 18, 20, .92));
+      backdrop-filter: blur(16px) saturate(145%);
+      -webkit-backdrop-filter: blur(16px) saturate(145%);
+      border: 1px solid rgba(52, 211, 153, .24);
+      box-shadow: 0 12px 40px rgba(2, 10, 12, .65), inset 0 1px 0 rgba(255,255,255,.05);
+    }
+    .num { font-family: 'JetBrains Mono', ui-monospace, monospace; font-variant-numeric: tabular-nums; }
+    .glow-emerald { color: #34d399; text-shadow: 0 0 14px rgba(52, 211, 153, .55); }
+    .glow-cyan { color: #38bdf8; text-shadow: 0 0 14px rgba(56, 189, 248, .5); }
+
+    /* Action buttons */
+    .act {
+      touch-action: manipulation;
+      user-select: none; -webkit-user-select: none;
+      transition: transform .12s ease, background-color .2s ease, box-shadow .2s ease, opacity .2s ease, border-color .2s;
+      border: 1px solid rgba(52, 211, 153, .28);
+      background: rgba(15, 36, 40, .92);
+    }
+    .act:active:not(:disabled) { transform: scale(.94); }
+    .act:disabled { opacity: .38; cursor: not-allowed; }
+    .act-record { background: linear-gradient(180deg, #10b981, #059669); color: #042f2e; border-color: #6ee7b7; box-shadow: 0 0 24px rgba(16,185,129,.35); }
+    .act-record[data-state="on"] { background: linear-gradient(180deg, #f43f5e, #e11d48); color: #fff; border-color: #fb7185; box-shadow: 0 0 26px rgba(244,63,94,.5); animation: recGlow 1.6s ease-in-out infinite; }
+    .act-rides { color: #7dd3fc; }
+    .act-reset { color: #fda4af; }
+    @keyframes recGlow { 50% { box-shadow: 0 0 36px rgba(244,63,94,.75); } }
+
+    .fab {
+      width: 46px; height: 46px; border-radius: 14px;
+      display: flex; align-items: center; justify-content: center;
+      color: #e2e8f0;
+    }
+    .fab[data-active="true"] { color: #34d399; border-color: rgba(52,211,153,.75); background: rgba(16, 185, 129, 0.22); }
+
+    .status-dot { width: 8px; height: 8px; border-radius: 50%; background: #34d399; box-shadow: 0 0 10px #34d399; }
+    .status-dot.red { background: #f43f5e; box-shadow: 0 0 10px #f43f5e; animation: blink 1s steps(2) infinite; }
+    .status-dot.amber { background: #fbbf24; box-shadow: 0 0 10px #fbbf24; animation: blink 1.4s ease-in-out infinite; }
+    .status-dot.slate { background: #64748b; box-shadow: none; }
+    @keyframes blink { 50% { opacity: .35; } }
+
+    .progress-track { background: rgba(30, 58, 62, .75); }
+    .progress-fill {
+      background: linear-gradient(90deg, #38bdf8, #34d399);
+      box-shadow: 0 0 12px rgba(52, 211, 153, .65);
+      transition: width .6s cubic-bezier(.2,.8,.2,1);
+    }
+
+    .spinner { width: 44px; height: 44px; border-radius: 50%; border: 3px solid rgba(52,211,153,.2); border-top-color: #34d399; animation: spin .9s linear infinite; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .toast { animation: toastIn .25s cubic-bezier(.2,.8,.2,1); }
+    .toast.out { animation: toastOut .25s ease forwards; }
+    @keyframes toastIn { from { opacity: 0; transform: translateY(-8px) scale(.98); } }
+    @keyframes toastOut { to { opacity: 0; transform: translateY(-8px) scale(.98); } }
+
+    .sheet-enter { animation: sheetIn .28s cubic-bezier(.2,.8,.2,1); }
+    @keyframes sheetIn { from { opacity: 0; transform: translateY(24px) scale(.98); } }
+
+    .hidden-i { display: none !important; }
+
+    /* Legend pill chips */
+    .net-pill {
+      touch-action: manipulation;
+      transition: all .15s ease;
+    }
+    .net-pill[data-on="false"] {
+      opacity: 0.42;
+      filter: grayscale(0.8);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: .001ms !important; animation-iteration-count: 1 !important; transition-duration: .001ms !important; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Full-Screen Map -->
+  <div id="map" aria-label="Singapore Cycling Network Map"></div>
+
+  <!-- Top HUD -->
+  <header id="hud" class="fixed top-0 left-0 right-0 z-[1000] pointer-events-none"
+          style="padding: calc(var(--sat) + 10px) calc(var(--sar) + 10px) 0 calc(var(--sal) + 10px);">
+    <div class="glass pointer-events-auto mx-auto max-w-xl rounded-2xl overflow-hidden">
+      <div class="flex items-center justify-between px-3.5 pt-3 pb-2">
+        <div class="flex items-center gap-2.5 min-w-0">
+          <div class="w-9 h-9 shrink-0 rounded-xl bg-emerald-400/15 border border-emerald-400/40 flex items-center justify-center shadow-[0_0_18px_rgba(52,211,153,.25)]">
+            <!-- Bicycle SVG Icon -->
+            <svg viewBox="0 0 24 24" class="w-5 h-5 text-emerald-400" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+              <circle cx="5.5" cy="17.5" r="3.5"/><circle cx="18.5" cy="17.5" r="3.5"/>
+              <path d="M15 6a1 1 0 1 0 0-2 1 1 0 0 0 0 2zm-3 11.5V14l-3-3 4-3 2 3h2"/>
+            </svg>
+          </div>
+          <div class="min-w-0">
+            <h1 class="font-display font-bold text-[15px] leading-tight tracking-tight text-slate-50 truncate">SG Cycle Explorer</h1>
+            <p id="subline" class="text-[11px] text-slate-400 leading-tight truncate">0 rides logged • NParks + LTA Live</p>
+          </div>
+        </div>
+        <div id="statusPill" class="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-slate-900/90 border border-emerald-500/30 text-[11px] font-semibold tracking-wide uppercase text-slate-200 shrink-0">
+          <span id="statusDot" class="status-dot"></span><span id="statusText">Loading DB</span>
+        </div>
+      </div>
+
+      <!-- 3-Column Metrics -->
+      <div class="grid grid-cols-3 divide-x divide-emerald-900/60 border-t border-emerald-900/60">
+        <div class="px-2 py-2.5 text-center">
+          <div class="text-[10px] font-semibold uppercase tracking-[.12em] text-slate-400">Network Cov</div>
+          <div class="num font-bold text-[22px] leading-7 glow-emerald"><span id="covVal">0.00</span><span class="text-[13px] text-emerald-300/80">%</span></div>
+          <div class="num text-[10px] text-slate-400"><span id="covKm">0.0</span> / <span id="targetKm">730</span> km</div>
+        </div>
+        <div class="px-2 py-2.5 text-center">
+          <div class="text-[10px] font-semibold uppercase tracking-[.12em] text-slate-400">Total Dist</div>
+          <div class="num font-bold text-[22px] leading-7 text-slate-50"><span id="distVal">0.00</span><span class="text-[13px] text-slate-400"> km</span></div>
+          <div class="num text-[10px] text-slate-400" id="distSub">all rides</div>
+        </div>
+        <div class="px-2 py-2.5 text-center">
+          <div class="text-[10px] font-semibold uppercase tracking-[.12em] text-slate-400">Speed</div>
+          <div class="num font-bold text-[22px] leading-7 glow-cyan"><span id="spdVal">0</span><span class="text-[13px] text-sky-300/80"> km/h</span></div>
+          <div class="num text-[10px] text-slate-400" id="spdSub">idle</div>
+        </div>
+      </div>
+
+      <!-- Interactive NParks + LTA Database Toggle Strip -->
+      <div class="flex items-center justify-between gap-1.5 px-3 py-1.5 bg-black/35 border-t border-emerald-900/50 text-[10px]">
+        <div class="flex items-center gap-1.5 overflow-x-auto">
+          <button id="toggleNparks" data-on="true" class="net-pill flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-emerald-500/15 border border-emerald-500/40 text-emerald-300 font-semibold">
+            <span class="w-2.5 h-1 rounded-full bg-emerald-400 inline-block"></span>
+            <span>NParks PCN</span>
+            <span id="nparksCount" class="num text-[9px] text-emerald-200/70">…</span>
+          </button>
+          <button id="toggleLta" data-on="true" class="net-pill flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-sky-500/15 border border-sky-500/40 text-sky-300 font-semibold">
+            <span class="w-2.5 h-1 rounded-full bg-sky-400 inline-block"></span>
+            <span>LTA Paths</span>
+            <span id="ltaCount" class="num text-[9px] text-sky-200/70">…</span>
+          </button>
+        </div>
+        <button id="btnRefreshDb" class="text-slate-400 hover:text-emerald-300 px-1.5 py-0.5 rounded transition flex items-center gap-1" title="Re-fetch live GeoJSON from data.gov.sg">
+          <svg viewBox="0 0 24 24" class="w-3 h-3" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>
+          <span>Sync</span>
+        </button>
+      </div>
+
+      <!-- Coverage Progress Bar -->
+      <div class="progress-track h-1 w-full">
+        <div id="covBar" class="progress-fill h-1" style="width:0%"></div>
+      </div>
+    </div>
+
+    <!-- Toasts -->
+    <div id="toasts" class="mx-auto max-w-xl mt-2 flex flex-col gap-2 items-center"></div>
+  </header>
+
+  <!-- Floating map controls -->
+  <div id="fabs" class="fixed z-[1000] flex flex-col gap-2"
+       style="right: calc(var(--sar) + 12px); bottom: calc(var(--bar-h) + var(--sab) + 34px);">
+    <button id="btnLayers" class="act fab glass" aria-label="Switch OneMap theme" title="OneMap Style (Night / Grey / Default)">
+      <svg viewBox="0 0 24 24" class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 13 9 5 9-5"/></svg>
+    </button>
+    <button id="btnFit" class="act fab glass" aria-label="Show all rides" title="Show all rides">
+      <svg viewBox="0 0 24 24" class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+    </button>
+    <button id="btnLocate" class="act fab glass" aria-label="Center on my location" title="My location" data-active="false">
+      <svg viewBox="0 0 24 24" class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="7.5"/></svg>
+    </button>
+  </div>
+
+  <!-- Live ride chip -->
+  <div id="liveChip" class="hidden-i fixed z-[1000] glass rounded-xl px-3 py-2 flex items-center gap-3"
+       style="left: calc(var(--sal) + 12px); bottom: calc(var(--bar-h) + var(--sab) + 34px);">
+    <div>
+      <div class="text-[9px] uppercase tracking-[.14em] text-slate-400 font-semibold" id="liveLabel">Ride</div>
+      <div class="num text-sm font-bold text-slate-50" id="liveTime">00:00</div>
+    </div>
+    <div class="w-px h-7 bg-emerald-900"></div>
+    <div>
+      <div class="text-[9px] uppercase tracking-[.14em] text-slate-400 font-semibold">This ride</div>
+      <div class="num text-sm font-bold glow-emerald"><span id="liveKm">0.00</span> km</div>
+    </div>
+    <div class="w-px h-7 bg-emerald-900"></div>
+    <div>
+      <div class="text-[9px] uppercase tracking-[.14em] text-slate-400 font-semibold">Points</div>
+      <div class="num text-sm font-bold text-sky-300" id="livePts">0</div>
+    </div>
+  </div>
+
+  <!-- Bottom action bar -->
+  <nav id="actionbar" class="fixed bottom-0 left-0 right-0 z-[1000] pointer-events-none"
+       style="padding: 0 calc(var(--sar) + 10px) calc(var(--sab) + 10px) calc(var(--sal) + 10px);">
+    <div class="glass pointer-events-auto mx-auto max-w-xl rounded-2xl p-2 grid grid-cols-[1.35fr_1fr_.8fr] gap-2" id="barInner">
+      <button id="btnRecord" class="act act-record rounded-xl h-[60px] flex items-center justify-center gap-2 font-display font-bold text-[15px]" data-state="off" aria-pressed="false">
+        <span id="recIcon" class="inline-flex"></span><span id="recText">Record Ride</span>
+      </button>
+      <button id="btnRidesList" class="act act-rides rounded-xl h-[60px] flex items-center justify-center gap-2 font-display font-semibold text-[14px]">
+        <svg viewBox="0 0 24 24" class="w-5 h-5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+        <span>Rides (<span id="ridesCountBadge" class="num">0</span>)</span>
+      </button>
+      <button id="btnReset" class="act act-reset rounded-xl h-[60px] flex flex-col items-center justify-center font-display font-semibold text-[11px]" aria-label="Clear all data">
+        <svg viewBox="0 0 24 24" class="w-5 h-5 mb-0.5" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v5M14 11v5"/></svg>
+        Reset
+      </button>
+    </div>
+  </nav>
+
+  <!-- Snapping overlay -->
+  <div id="snapOverlay" class="hidden-i fixed inset-0 z-[2000] flex items-center justify-center bg-slate-950/60 backdrop-blur-sm">
+    <div class="glass rounded-2xl px-6 py-5 flex flex-col items-center gap-3 mx-6 max-w-xs text-center sheet-enter">
+      <div class="spinner"></div>
+      <div class="font-display font-semibold text-slate-50">Snapping to cycling paths</div>
+      <div id="snapText" class="text-xs text-slate-400 num">Contacting OSRM Bicycle…</div>
+    </div>
+  </div>
+
+  <!-- Confirmation Modal -->
+  <div id="modal" class="hidden-i fixed inset-0 z-[3000] flex items-end sm:items-center justify-center bg-slate-950/75 backdrop-blur-sm"
+       style="padding: 16px calc(var(--sar) + 12px) calc(var(--sab) + 16px) calc(var(--sal) + 12px);" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+    <div class="glass rounded-2xl w-full max-w-sm p-5 sheet-enter">
+      <h2 id="modalTitle" class="font-display font-bold text-lg text-slate-50"></h2>
+      <p id="modalBody" class="text-sm text-slate-300 mt-2 leading-relaxed"></p>
+      <div class="grid grid-cols-2 gap-2 mt-5">
+        <button id="modalCancel" class="act rounded-xl h-12 font-semibold text-slate-200"></button>
+        <button id="modalOk" class="act rounded-xl h-12 font-bold"></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tracked Rides Drawer Modal -->
+  <div id="ridesModal" class="hidden-i fixed inset-0 z-[2500] flex items-end sm:items-center justify-center bg-slate-950/75 backdrop-blur-sm"
+       style="padding: 16px calc(var(--sar) + 12px) calc(var(--sab) + 16px) calc(var(--sal) + 12px);" role="dialog" aria-modal="true" aria-labelledby="ridesModalTitle">
+    <div class="glass rounded-2xl w-full max-w-md max-h-[78vh] flex flex-col overflow-hidden sheet-enter">
+      <div class="flex items-center justify-between px-4 py-3.5 border-b border-emerald-900/60">
+        <div>
+          <h2 id="ridesModalTitle" class="font-display font-bold text-base text-slate-50">Tracked Cycling Rides</h2>
+          <p id="ridesModalSub" class="text-[11px] text-slate-400 num">0 rides • 0.00 km total</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <button id="btnFitAllModal" class="act rounded-lg px-2.5 py-1.5 text-xs font-semibold text-emerald-300">Show All</button>
+          <button id="btnCloseRides" class="act rounded-lg w-8 h-8 flex items-center justify-center text-slate-300 text-lg leading-none" aria-label="Close">&times;</button>
+        </div>
+      </div>
+      <div id="ridesListContainer" class="p-3 overflow-y-auto flex-1 space-y-2">
+        <!-- Populated dynamically -->
+      </div>
+    </div>
+  </div>
+
+  <script>
+  (function () {
+    'use strict';
+
+    /* ================================================================
+       Configuration: Official NParks + LTA Data.gov.sg Datasets & OSRM Bike
+       ================================================================ */
+    var CFG = {
+      BASELINE_KM: 730.0, // Singapore islandwide PCN + LTA cycling path target (km)
+      CENTER: [1.3521, 103.8198],
+      ZOOM: 12,
+      // Official Data.gov.sg Open API v1 Dataset IDs
+      DATASETS: {
+        NPARKS_PCN: 'd_a69ef89737379f231d2ae93fd1c5707f', // NParks Park Connector Loop (GEOJSON)
+        LTA_CYCLING: 'd_8f468b25193f64be8a16fa7d8f60f553' // LTA Cycling Path Network (GEOJSON)
+      },
+      // OSRM Bicycle Routing Profile for snapping to park connectors & cycling lanes
+      OSRM_MATCH: 'https://router.project-osrm.org/match/v1/bicycle/',
+      CHUNK: 10,
+      CHUNK_DELAY_MS: 1100,
+      STORE_KEY: 'sgcycle.v1.data',
+      ACTIVE_KEY: 'sgcycle.v1.active',
+      PREFS_KEY: 'sgcycle.v1.prefs',
+      CELL_DEG: 0.00025,       // ~28 m spatial deduplication grid cell
+      SAMPLE_M: 20,            // coverage sampling interval (m)
+      MIN_STEP_M: 4,           // cycling GPS step filter (m)
+      MAX_ACC_M: 50,
+      MIN_SAVE_KM: 0.03
+    };
+
+    // Official SLA OneMap Basemaps (Zero API key required)
+    var TILES = {
+      onemap_night: {
+        name: 'SLA OneMap Night',
+        url: 'https://www.onemap.gov.sg/maps/tiles/Night/{z}/{x}/{y}.png',
+        opts: {
+          minZoom: 11, maxZoom: 19,
+          attribution: '<img src="https://www.onemap.gov.sg/web-assets/images/logo/om_logo.png" style="height:12px;width:12px;display:inline;vertical-align:middle;margin-right:3px;"/> OneMap &copy; SLA | NParks &amp; LTA'
+        }
+      },
+      onemap_grey: {
+        name: 'SLA OneMap Grey',
+        url: 'https://www.onemap.gov.sg/maps/tiles/Grey/{z}/{x}/{y}.png',
+        opts: {
+          minZoom: 11, maxZoom: 19,
+          attribution: '<img src="https://www.onemap.gov.sg/web-assets/images/logo/om_logo.png" style="height:12px;width:12px;display:inline;vertical-align:middle;margin-right:3px;"/> OneMap &copy; SLA | NParks &amp; LTA'
+        }
+      },
+      onemap_default: {
+        name: 'SLA OneMap Default',
+        url: 'https://www.onemap.gov.sg/maps/tiles/Default/{z}/{x}/{y}.png',
+        opts: {
+          minZoom: 11, maxZoom: 19,
+          attribution: '<img src="https://www.onemap.gov.sg/web-assets/images/logo/om_logo.png" style="height:12px;width:12px;display:inline;vertical-align:middle;margin-right:3px;"/> OneMap &copy; SLA | NParks &amp; LTA'
+        }
+      }
+    };
+    var TILE_ORDER = ['onemap_night', 'onemap_grey', 'onemap_default'];
+
+    /* ================================================================
+       Helpers
+       ================================================================ */
+    var $ = function (id) { return document.getElementById(id); };
+    var R_EARTH = 6371008.8;
+    function toRad(d) { return d * Math.PI / 180; }
+    function hav(a, b) {
+      var dLat = toRad(b[0] - a[0]), dLng = toRad(b[1] - a[1]);
+      var s = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+              Math.cos(toRad(a[0])) * Math.cos(toRad(b[0])) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+      return 2 * R_EARTH * Math.asin(Math.min(1, Math.sqrt(s)));
+    }
+    function pathLenM(pts) {
+      var m = 0;
+      for (var i = 1; i < pts.length; i++) m += hav(pts[i - 1], pts[i]);
+      return m;
+    }
+    function r5(n) { return Math.round(n * 1e5) / 1e5; }
+    function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+    function haptic(p) { try { if (navigator.vibrate) navigator.vibrate(p); } catch (e) {} }
+    function fmtKm(km) { return km < 100 ? km.toFixed(2) : km < 1000 ? km.toFixed(1) : Math.round(km).toLocaleString(); }
+    function fmtPct(p) { return p < 1 ? p.toFixed(3) : p < 10 ? p.toFixed(2) : p.toFixed(1); }
+    function fmtDur(sec) {
+      sec = Math.max(0, Math.floor(sec));
+      var h = Math.floor(sec / 3600), m = Math.floor((sec % 3600) / 60), s = sec % 60;
+      var mm = String(m).padStart(2, '0'), ss = String(s).padStart(2, '0');
+      return h ? h + ':' + mm + ':' + ss : mm + ':' + ss;
+    }
+    function lsGet(k, fb) { try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : fb; } catch (e) { return fb; } }
+    function lsSet(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); return true; } catch (e) { return false; } }
+    function lsDel(k) { try { localStorage.removeItem(k); } catch (e) {} }
+
+    var ICONS = {
+      rec: '<svg viewBox="0 0 24 24" class="w-5 h-5" fill="currentColor"><circle cx="12" cy="12" r="7"/></svg>',
+      stop: '<svg viewBox="0 0 24 24" class="w-5 h-5" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2.5"/></svg>'
+    };
+
+    /* ================================================================
+       UI Feedback: Status Pill, Toasts & Confirmation Modal
+       ================================================================ */
+    function setStatus(text, color) {
+      $('statusText').textContent = text;
+      var dot = $('statusDot');
+      dot.className = 'status-dot' + (color && color !== 'green' ? ' ' + color : '');
+    }
+
+    function toast(html, kind, ms) {
+      var box = $('toasts');
+      if (!box) return;
+      var el = document.createElement('div');
+      var tone = kind === 'error' ? 'border-rose-500/60 text-rose-100'
+               : kind === 'warn'  ? 'border-amber-400/60 text-amber-100'
+               : kind === 'ok'    ? 'border-emerald-400/60 text-emerald-50'
+               : 'border-sky-400/50 text-slate-100';
+      el.className = 'toast glass pointer-events-auto rounded-xl px-3.5 py-2 text-xs leading-snug max-w-md border ' + tone;
+      el.innerHTML = html;
+      box.appendChild(el);
+      setTimeout(function () {
+        el.classList.add('out');
+        setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 260);
+      }, ms || 3400);
+    }
+
+    function ask(opts) {
+      return new Promise(function (resolve) {
+        var modal = $('modal');
+        $('modalTitle').textContent = opts.title || 'Confirm';
+        $('modalBody').textContent = opts.body || '';
+        var cancelBtn = $('modalCancel');
+        var okBtn = $('modalOk');
+        cancelBtn.textContent = opts.cancel || 'Cancel';
+        okBtn.textContent = opts.ok || 'Confirm';
+        okBtn.className = 'act rounded-xl h-12 font-bold ' + (
+          opts.danger
+            ? 'bg-rose-600/90 border-rose-400 text-white'
+            : 'bg-emerald-500 border-emerald-300 text-slate-950'
+        );
+
+        function close(val) {
+          modal.classList.add('hidden-i');
+          cancelBtn.onclick = null;
+          okBtn.onclick = null;
+          modal.onclick = null;
+          resolve(val);
+        }
+        cancelBtn.onclick = function () { close(false); };
+        okBtn.onclick = function () { close(true); };
+        modal.onclick = function (e) { if (e.target === modal) close(false); };
+        modal.classList.remove('hidden-i');
+      });
+    }
+
+    /* ================================================================
+       Viewport Sync (iOS Safari Safe Area)
+       ================================================================ */
+    function syncViewport() {
+      var h = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
+      document.documentElement.style.setProperty('--app-h', Math.round(h) + 'px');
+      var bar = $('barInner');
+      if (bar) document.documentElement.style.setProperty('--bar-h', Math.round(bar.offsetHeight) + 'px');
+    }
+    syncViewport();
+
+    /* ================================================================
+       Map & Panes Setup
+       ================================================================ */
+    var prefs = lsGet(CFG.PREFS_KEY, { tiles: 'onemap_night', showNparks: true, showLta: true });
+    if (!TILES[prefs.tiles]) prefs.tiles = 'onemap_night';
+
+    var map = L.map('map', {
+      zoomControl: false,
+      attributionControl: true,
+      preferCanvas: true,
+      worldCopyJump: false,
+      maxBounds: L.latLngBounds([1.14, 103.58], [1.49, 104.12]),
+      maxBoundsViscosity: 0.85,
+      minZoom: 11
+    }).setView(CFG.CENTER, CFG.ZOOM);
+    map.attributionControl.setPrefix(false);
+
+    var tileLayer = null;
+    function setTiles(key) {
+      var t = TILES[key];
+      if (tileLayer) map.removeLayer(tileLayer);
+      tileLayer = L.tileLayer(t.url, Object.assign({ detectRetina: false, keepBuffer: 4 }, t.opts)).addTo(map);
+      prefs.tiles = key;
+      lsSet(CFG.PREFS_KEY, prefs);
+    }
+    setTiles(prefs.tiles);
+
+    // Custom Z-Index Panes: Network Overlays (bottom) -> Ridden Trails (middle) -> Live GPS (top)
+    map.createPane('network').style.zIndex = 390;
+    map.createPane('rides').style.zIndex = 410;
+    map.createPane('live').style.zIndex = 425;
+
+    var networkRenderer = L.canvas({ pane: 'network', padding: 0.5 });
+    var ridesRenderer = L.svg({ pane: 'rides', padding: 0.5 });
+    var liveRenderer = L.svg({ pane: 'live', padding: 0.5 });
+
+    var nparksGroup = L.layerGroup();
+    var ltaGroup = L.layerGroup();
+    if (prefs.showNparks) nparksGroup.addTo(map);
+    if (prefs.showLta) ltaGroup.addTo(map);
+
+    var ridesLayer = L.layerGroup().addTo(map);
+    var liveLine = L.polyline([], {
+      renderer: liveRenderer,
+      color: '#38bdf8',
+      weight: 4,
+      opacity: 0.95,
+      dashArray: '2 8',
+      lineCap: 'round',
+      interactive: false
+    }).addTo(map);
+
+    var userMarker = null, accCircle = null;
+
+    function updateUserMarker(lat, lng, acc) {
+      var ll = [lat, lng];
+      if (!userMarker) {
+        userMarker = L.marker(ll, {
+          icon: L.divIcon({
+            className: '',
+            html: '<div class="user-dot"></div>',
+            iconSize: [18, 18],
+            iconAnchor: [9, 9]
+          }),
+          interactive: false, keyboard: false, zIndexOffset: 1000
+        }).addTo(map);
+        accCircle = L.circle(ll, {
+          radius: acc || 10,
+          color: '#34d399',
+          weight: 1,
+          opacity: 0.4,
+          fillOpacity: 0.08,
+          interactive: false
+        }).addTo(map);
+      } else {
+        userMarker.setLatLng(ll);
+        accCircle.setLatLng(ll).setRadius(acc || 10);
+      }
+      accCircle.setStyle({ color: '#34d399' });
+    }
+
+    function clearUserMarker() {
+      if (userMarker) { map.removeLayer(userMarker); userMarker = null; }
+      if (accCircle) { map.removeLayer(accCircle); accCircle = null; }
+    }
+
+    var resizeT = null;
+    function onViewportChange() {
+      clearTimeout(resizeT);
+      resizeT = setTimeout(function () { syncViewport(); map.invalidateSize({ pan: false }); }, 120);
+    }
+    window.addEventListener('resize', onViewportChange);
+    window.addEventListener('orientationchange', function () { setTimeout(onViewportChange, 300); });
+    if (window.visualViewport) window.visualViewport.addEventListener('resize', onViewportChange);
+    window.addEventListener('load', function () { syncViewport(); map.invalidateSize(); });
+    setTimeout(function () { map.invalidateSize(); }, 250);
+
+    /* ================================================================
+       IndexedDB Cache + Live Fetch for NParks & LTA GeoJSON Databases
+       ================================================================ */
+    var IDB_NAME = 'sgcycle_geojson_cache_v1';
+    var IDB_STORE = 'datasets';
+
+    function openDb() {
+      return new Promise(function (resolve, reject) {
+        if (!window.indexedDB) return reject(new Error('No IndexedDB'));
+        var req = indexedDB.open(IDB_NAME, 1);
+        req.onupgradeneeded = function (e) {
+          e.target.result.createObjectStore(IDB_STORE);
+        };
+        req.onsuccess = function (e) { resolve(e.target.result); };
+        req.onerror = function (e) { reject(e.target.error); };
+      });
+    }
+
+    function dbGet(key) {
+      return openDb().then(function (db) {
+        return new Promise(function (resolve, reject) {
+          var tx = db.transaction(IDB_STORE, 'readonly');
+          var req = tx.objectStore(IDB_STORE).get(key);
+          req.onsuccess = function () { resolve(req.result || null); };
+          req.onerror = function () { reject(req.error); };
+        });
+      }).catch(function () { return null; });
+    }
+
+    function dbSet(key, val) {
+      return openDb().then(function (db) {
+        return new Promise(function (resolve) {
+          var tx = db.transaction(IDB_STORE, 'readwrite');
+          tx.objectStore(IDB_STORE).put(val, key);
+          tx.oncomplete = function () { resolve(true); };
+          tx.onerror = function () { resolve(false); };
+        });
+      }).catch(function () { return false; });
+    }
+
+    // Fetches official GeoJSON from data.gov.sg OpenAPI v1 poll-download endpoint
+    async function fetchDataGovGeoJson(datasetId) {
+      var pollUrl = 'https://api-open.data.gov.sg/v1/public/api/datasets/' + datasetId + '/poll-download';
+      var res = await fetch(pollUrl, { headers: { 'Accept': 'application/json' } });
+      if (!res.ok) throw new Error('Data.gov.sg API HTTP ' + res.status);
+      var meta = await res.json();
+      if (meta.code !== 0 || !meta.data || !meta.data.url) {
+        throw new Error(meta.errMsg || 'Missing GeoJSON download URL');
+      }
+      var geoRes = await fetch(meta.data.url);
+      if (!geoRes.ok) throw new Error('GeoJSON file HTTP ' + geoRes.status);
+      return await geoRes.json();
+    }
+
+    // Computes total length (km) of all LineString / MultiLineString geometries in a GeoJSON FeatureCollection
+    function calcGeoJsonKm(fc) {
+      var totalM = 0;
+      if (!fc || !Array.isArray(fc.features)) return 0;
+      fc.features.forEach(function (f) {
+        var g = f && f.geometry;
+        if (!g || !g.coordinates) return;
+        if (g.type === 'LineString') {
+          var pts = g.coordinates.map(function (c) { return [c[1], c[0]]; });
+          totalM += pathLenM(pts);
+        } else if (g.type === 'MultiLineString') {
+          g.coordinates.forEach(function (line) {
+            var pts = line.map(function (c) { return [c[1], c[0]]; });
+            totalM += pathLenM(pts);
+          });
+        }
+      });
+      return totalM / 1000;
+    }
+
+    var networkStats = { nparksKm: 0, ltaKm: 0 };
+
+    function escapeHtml(str) {
+      return str.replace(/[&<>"']/g, function (m) {
+        return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[m];
+      });
+    }
+
+    function renderGeoJsonNetwork(fc, targetGroup, color, agencyLabel) {
+      targetGroup.clearLayers();
+      if (!fc || !Array.isArray(fc.features)) return;
+
+      L.geoJSON(fc, {
+        renderer: networkRenderer,
+        pane: 'network',
+        style: function () {
+          return {
+            color: color,
+            weight: 3,
+            opacity: 0.65,
+            lineCap: 'round',
+            lineJoin: 'round'
+          };
+        },
+        onEachFeature: function (feature, layer) {
+          var p = feature.properties || {};
+          var title = p.PCN_LOOP || p.NAME || p.CYL_PATH || p.INC_CRC || agencyLabel;
+          var maint = p.AGENCY_MAINT || p.AGENCY || agencyLabel;
+          var lenStr = p['SHAPE_1.LEN'] ? (Number(p['SHAPE_1.LEN']) / 1000).toFixed(2) + ' km' : '';
+
+          var html = '<div style="min-width:160px">' +
+            '<div style="font-size:10px;text-transform:uppercase;letter-spacing:.08em;color:' + color + ';font-weight:700">' + agencyLabel + '</div>' +
+            '<div style="font-weight:700;font-size:13px;color:#f8fafc;margin-top:2px">' + escapeHtml(String(title)) + '</div>' +
+            (maint && maint !== title ? '<div style="color:#94a3b8;font-size:11px;margin-top:2px">Maintained by: ' + escapeHtml(String(maint)) + '</div>' : '') +
+            (lenStr ? '<div class="num" style="color:#cbd5e1;font-size:11px;margin-top:2px">Segment: ' + lenStr + '</div>' : '') +
+            '</div>';
+          layer.bindPopup(html);
+        }
+      }).addTo(targetGroup);
+    }
+
+    async function loadOfficialNetworks(forceRefresh) {
+      setStatus('Loading DB', 'amber');
+      $('nparksCount').textContent = '…';
+      $('ltaCount').textContent = '…';
+
+      var cachedNparks = !forceRefresh ? await dbGet('nparks_pcn') : null;
+      var cachedLta = !forceRefresh ? await dbGet('lta_cycling') : null;
+
+      // Load NParks Park Connector Loop (Emerald Green)
+      try {
+        var nparksFc = cachedNparks && cachedNparks.data ? cachedNparks.data : null;
+        if (!nparksFc) {
+          nparksFc = await fetchDataGovGeoJson(CFG.DATASETS.NPARKS_PCN);
+          await dbSet('nparks_pcn', { ts: Date.now(), data: nparksFc });
+        }
+        networkStats.nparksKm = calcGeoJsonKm(nparksFc);
+        $('nparksCount').textContent = Math.round(networkStats.nparksKm) + 'km';
+        renderGeoJsonNetwork(nparksFc, nparksGroup, '#34d399', 'NParks Park Connector');
+      } catch (err) {
+        $('nparksCount').textContent = 'Err';
+        toast('NParks PCN load failed: ' + err.message, 'warn');
+      }
+
+      // Load LTA Cycling Path Network (Cyan Blue)
+      try {
+        var ltaFc = cachedLta && cachedLta.data ? cachedLta.data : null;
+        if (!ltaFc) {
+          ltaFc = await fetchDataGovGeoJson(CFG.DATASETS.LTA_CYCLING);
+          await dbSet('lta_cycling', { ts: Date.now(), data: ltaFc });
+        }
+        networkStats.ltaKm = calcGeoJsonKm(ltaFc);
+        $('ltaCount').textContent = Math.round(networkStats.ltaKm) + 'km';
+        renderGeoJsonNetwork(ltaFc, ltaGroup, '#38bdf8', 'LTA Cycling Path');
+      } catch (err2) {
+        $('ltaCount').textContent = 'Err';
+        toast('LTA Cycling Path load failed: ' + err2.message, 'warn');
+      }
+
+      // Update dynamic target baseline if combined datasets exceed 100 km
+      var combined = networkStats.nparksKm + networkStats.ltaKm;
+      if (combined > 100) {
+        CFG.BASELINE_KM = Math.round(combined);
+      }
+      renderStats();
+      if (!recording) setStatus('Ready', 'green');
+    }
+
+    /* ================================================================
+       OSRM Bicycle Map-Matching (Snaps GPS points to cycling paths)
+       ================================================================ */
+    function simplifyPts(pts, minGapM) {
+      if (pts.length <= 2) return pts.slice();
+      var out = [pts[0]];
+      for (var i = 1; i < pts.length - 1; i++) {
+        if (hav(out[out.length - 1], pts[i]) >= minGapM) out.push(pts[i]);
+      }
+      out.push(pts[pts.length - 1]);
+      return out;
+    }
+
+    function splitByGaps(pts, maxGapM) {
+      var chunks = [], cur = [pts[0]];
+      for (var i = 1; i < pts.length; i++) {
+        if (hav(pts[i - 1], pts[i]) > maxGapM) {
+          if (cur.length >= 2) chunks.push(cur);
+          cur = [pts[i]];
+        } else {
+          cur.push(pts[i]);
+        }
+      }
+      if (cur.length >= 2) chunks.push(cur);
+      return chunks;
+    }
+
+    async function snapChunk(pts) {
+      var coords = pts.map(function (p) { return r5(p[1]) + ',' + r5(p[0]); }).join(';');
+      var radiuses = pts.map(function () { return '25'; }).join(';');
+      var url = CFG.OSRM_MATCH + coords + '?overview=full&geometries=geojson&steps=false&tidy=true&radiuses=' + radiuses;
+      var ctrl = typeof AbortController !== 'undefined' ? new AbortController() : null;
+      var t = ctrl ? setTimeout(function () { ctrl.abort(); }, 10000) : null;
+      try {
+        var res = await fetch(url, ctrl ? { signal: ctrl.signal } : {});
+        if (t) clearTimeout(t);
+        if (!res.ok) return null;
+        var json = await res.json();
+        if (json.code !== 'Ok' || !Array.isArray(json.matchings) || !json.matchings.length) return null;
+        var out = [];
+        json.matchings.forEach(function (m) {
+          if (m.geometry && Array.isArray(m.geometry.coordinates)) {
+            m.geometry.coordinates.forEach(function (c) {
+              out.push([c[1], c[0]]);
+            });
+          }
+        });
+        return out.length >= 2 ? out : null;
+      } catch (e) {
+        if (t) clearTimeout(t);
+        return null;
+      }
+    }
+
+    async function snapTrack(rawPts, onProgress) {
+      var clean = simplifyPts(rawPts, 8);
+      if (clean.length < 2) return { segs: [rawPts], snapped: false };
+
+      // Split across large GPS gaps (>800m) so OSRM matches clean continuous segments
+      var continuousParts = splitByGaps(clean, 800);
+      var allBatches = [];
+      continuousParts.forEach(function (part) {
+        if (part.length <= CFG.CHUNK) {
+          allBatches.push(part);
+        } else {
+          for (var i = 0; i < part.length - 1; i += CFG.CHUNK - 1) {
+            var slice = part.slice(i, i + CFG.CHUNK);
+            if (slice.length >= 2) allBatches.push(slice);
+          }
+        }
+      });
+
+      var matchedSegs = [];
+      var anySnapped = false;
+      for (var b = 0; b < allBatches.length; b++) {
+        if (onProgress) onProgress(b + 1, allBatches.length);
+        if (b > 0) await sleep(CFG.CHUNK_DELAY_MS);
+        var snapped = await snapChunk(allBatches[b]);
+        if (snapped) {
+          anySnapped = true;
+          // Merge seamlessly if overlapping endpoint is within 30m
+          if (matchedSegs.length && hav(matchedSegs[matchedSegs.length - 1][matchedSegs[matchedSegs.length - 1].length - 1], snapped[0]) < 30) {
+            matchedSegs[matchedSegs.length - 1] = matchedSegs[matchedSegs.length - 1].concat(snapped.slice(1));
+          } else {
+            matchedSegs.push(snapped);
+          }
+        } else {
+          matchedSegs.push(allBatches[b]);
+        }
+      }
+      return { segs: matchedSegs, snapped: anySnapped };
+    }
+
+    /* ================================================================
+       Ride Data, Spatial Deduplication & Persistence
+       ================================================================ */
+    var data = lsGet(CFG.STORE_KEY, null);
+    if (!data || !Array.isArray(data.rides)) data = { v: 1, rides: [], totalKm: 0 };
+
+    var cells = new Set();
+    var coverageKm = 0;
+
+    function cellKey(lat, lng) {
+      return Math.round(lat / CFG.CELL_DEG) + ':' + Math.round(lng / CFG.CELL_DEG);
+    }
+
+    // Spatial grid deduplication: only counts newly explored ~28m cells
+    function coverSeg(seg, set) {
+      var added = 0;
+      for (var i = 1; i < seg.length; i++) {
+        var a = seg[i - 1], b = seg[i];
+        var d = hav(a, b);
+        if (d <= 0 || d > 3000) continue;
+        var n = Math.max(1, Math.ceil(d / CFG.SAMPLE_M)), step = d / n;
+        for (var k = 0; k < n; k++) {
+          var f = (k + 0.5) / n;
+          var key = cellKey(a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f);
+          if (!set.has(key)) { set.add(key); added += step; }
+        }
+      }
+      return added / 1000;
+    }
+
+    function recomputeCoverage() {
+      cells = new Set();
+      coverageKm = 0;
+      data.rides.forEach(function (r) {
+        r.segs.forEach(function (s) {
+          coverageKm += coverSeg(s, cells);
+        });
+      });
+    }
+
+    function totalKm() {
+      return data.rides.reduce(function (sum, r) { return sum + (r.km || 0); }, 0);
+    }
+
+    function saveData() {
+      data.totalKm = totalKm();
+      if (!lsSet(CFG.STORE_KEY, data)) {
+        toast('Storage full — could not save ride to device.', 'error');
+      }
+    }
+
+    function drawRide(ride) {
+      ride.segs.forEach(function (seg) {
+        if (seg.length < 2) return;
+        // High-contrast golden-amber trail over emerald/cyan base network
+        L.polyline(seg, { renderer: ridesRenderer, color: '#92400e', weight: 7, opacity: 0.48, lineCap: 'round', lineJoin: 'round', interactive: false }).addTo(ridesLayer);
+        var line = L.polyline(seg, { renderer: ridesRenderer, color: '#fbbf24', weight: 3.8, opacity: 0.96, lineCap: 'round', lineJoin: 'round' }).addTo(ridesLayer);
+        var d = new Date(ride.at);
+        var when = isNaN(d) ? '' : d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+        line.bindPopup(
+          '<strong>Cycling Ride</strong><br>' +
+          '<span class="num">' + fmtKm(ride.km) + ' km</span>' +
+          (ride.dur ? ' · <span class="num">' + fmtDur(ride.dur) + '</span>' : '') +
+          (when ? '<br><span style="color:#94a3b8">' + when + '</span>' : '') +
+          (ride.snapped === false ? '<br><span style="color:#fbbf24">Raw GPS (offline)</span>' : '')
+        );
+      });
+    }
+
+    function drawAllRides() {
+      ridesLayer.clearLayers();
+      data.rides.forEach(drawRide);
+    }
+
+    function renderStats() {
+      var cov = Math.min(coverageKm, CFG.BASELINE_KM);
+      var pct = (cov / CFG.BASELINE_KM) * 100;
+      $('covVal').textContent = fmtPct(pct);
+      $('covKm').textContent = fmtKm(cov);
+      $('targetKm').textContent = Math.round(CFG.BASELINE_KM).toLocaleString();
+      $('covBar').style.width = Math.min(100, pct).toFixed(2) + '%';
+
+      var tot = totalKm();
+      $('distVal').textContent = fmtKm(tot);
+      var n = data.rides.length;
+      $('ridesCountBadge').textContent = String(n);
+      $('subline').textContent = n + (n === 1 ? ' ride logged' : ' rides logged') + ' • NParks + LTA';
+      $('distSub').textContent = n ? ('across ' + n + (n === 1 ? ' ride' : ' rides')) : 'all rides';
+      $('btnFit').disabled = n === 0;
+      $('btnReset').disabled = n === 0 && !recording;
+    }
+
+    function openRidesModal() {
+      var listEl = $('ridesListContainer');
+      var n = data.rides.length;
+      $('ridesModalSub').textContent = n + (n === 1 ? ' ride' : ' rides') + ' • ' + fmtKm(totalKm()) + ' km total';
+      $('btnFitAllModal').disabled = n === 0;
+
+      if (n === 0) {
+        listEl.innerHTML = '<div class="text-center py-8 text-slate-400 text-xs">No tracked rides yet.<br>Tap <strong class="text-emerald-300">Record Ride</strong> to log your first cycling route!</div>';
+      } else {
+        listEl.innerHTML = '';
+        // Display most recent rides first
+        data.rides.slice().reverse().forEach(function (ride, revIdx) {
+          var rideNum = n - revIdx;
+          var d = new Date(ride.at);
+          var dateStr = isNaN(d) ? 'Unknown date' : d.toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }) + ' · ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+
+          var card = document.createElement('div');
+          card.className = 'rounded-xl bg-slate-900/80 border border-emerald-900/60 p-3 flex items-center justify-between gap-2';
+          card.innerHTML =
+            '<div class="min-w-0 flex-1">' +
+              '<div class="flex items-center gap-2">' +
+                '<span class="text-xs font-bold text-amber-400">Ride #' + rideNum + '</span>' +
+                '<span class="num text-xs font-bold text-slate-100">' + fmtKm(ride.km) + ' km</span>' +
+                (ride.dur ? '<span class="num text-[11px] text-slate-400">(' + fmtDur(ride.dur) + ')</span>' : '') +
+              '</div>' +
+              '<div class="text-[11px] text-slate-400 truncate mt-0.5">' + dateStr + '</div>' +
+            '</div>' +
+            '<div class="flex items-center gap-1.5 shrink-0">' +
+              '<button data-action="view" class="act rounded-lg px-2.5 py-1.5 text-xs font-semibold text-sky-300">View</button>' +
+              '<button data-action="delete" class="act rounded-lg px-2 py-1.5 text-xs font-semibold text-rose-300" aria-label="Delete ride">&times;</button>' +
+            '</div>';
+
+          card.querySelector('[data-action="view"]').onclick = function () {
+            haptic(10);
+            var pts = [];
+            ride.segs.forEach(function (s) { s.forEach(function (p) { pts.push(p); }); });
+            if (pts.length) {
+              follow = false;
+              $('btnLocate').dataset.active = 'false';
+              $('ridesModal').classList.add('hidden-i');
+              map.fitBounds(L.latLngBounds(pts), { padding: [75, 75], maxZoom: 16 });
+            }
+          };
+
+          card.querySelector('[data-action="delete"]').onclick = async function () {
+            haptic(15);
+            var ok = await ask({
+              title: 'Delete Ride #' + rideNum + '?',
+              body: 'Remove this ' + fmtKm(ride.km) + ' km ride and recalculate your NParks + LTA network coverage?',
+              ok: 'Delete',
+              danger: true
+            });
+            if (!ok) return;
+            data.rides = data.rides.filter(function (item) { return item.id !== ride.id; });
+            saveData();
+            recomputeCoverage();
+            drawAllRides();
+            renderStats();
+            openRidesModal();
+            toast('Ride removed.', 'warn', 2400);
+          };
+
+          listEl.appendChild(card);
+        });
+      }
+      $('ridesModal').classList.remove('hidden-i');
+    }
+
+    recomputeCoverage();
+    drawAllRides();
+    renderStats();
+
+    /* ================================================================
+       Screen Wake Lock (Prevents screen sleep while riding)
+       ================================================================ */
+    var wakeLock = null;
+    async function requestWakeLock() {
+      try {
+        if ('wakeLock' in navigator) {
+          wakeLock = await navigator.wakeLock.request('screen');
+        }
+      } catch (e) { /* non-fatal if unsupported */ }
+    }
+    function releaseWakeLock() {
+      if (wakeLock) {
+        try { wakeLock.release(); } catch (e) {}
+        wakeLock = null;
+      }
+    }
+    document.addEventListener('visibilitychange', function () {
+      if (document.visibilityState === 'visible' && recording) {
+        requestWakeLock();
+      }
+    });
+
+    /* ================================================================
+       Active Ride Recording
+       ================================================================ */
+    var recording = false, finishing = false;
+    var watchId = null, durTimer = null;
+    var active = null;
+    var follow = true;
+
+    function startLiveUI() {
+      $('liveChip').classList.remove('hidden-i');
+      $('liveLabel').textContent = 'Cycling';
+      $('liveTime').textContent = '00:00';
+      $('liveKm').textContent = '0.00';
+      $('livePts').textContent = '0';
+      $('btnLocate').dataset.active = 'true';
+      follow = true;
+      durTimer = setInterval(function () {
+        if (!active) return;
+        var sec = (Date.now() - active.startedAt) / 1000;
+        $('liveTime').textContent = fmtDur(sec);
+      }, 500);
+    }
+
+    function stopLiveUI() {
+      clearInterval(durTimer); durTimer = null;
+      $('liveChip').classList.add('hidden-i');
+      $('spdVal').textContent = '0';
+      $('spdSub').textContent = 'idle';
+      liveLine.setLatLngs([]);
+      clearUserMarker();
+    }
+
+    function updateButtons() {
+      var rec = $('btnRecord');
+      rec.dataset.state = recording ? 'on' : 'off';
+      rec.setAttribute('aria-pressed', String(recording));
+      $('recIcon').innerHTML = recording ? ICONS.stop : ICONS.rec;
+      $('recText').textContent = recording ? 'Stop & Save' : 'Record Ride';
+      rec.disabled = finishing;
+
+      $('btnRidesList').disabled = finishing;
+      $('btnReset').disabled = recording || finishing || data.rides.length === 0;
+    }
+    updateButtons();
+
+    function pushPoint(lat, lng, speedKmh, acc) {
+      var pt = [lat, lng];
+      var pts = active.pts;
+      if (pts.length) {
+        var d = hav(pts[pts.length - 1], pt);
+        if (d < CFG.MIN_STEP_M) {
+          updateUserMarker(lat, lng, acc);
+          return;
+        }
+        active.rawKm += d / 1000;
+      }
+      pts.push(pt);
+      liveLine.addLatLng(pt);
+      updateUserMarker(lat, lng, acc);
+      if (follow) map.panTo(pt, { animate: true, duration: 0.4 });
+      $('liveKm').textContent = fmtKm(active.rawKm);
+      $('livePts').textContent = String(pts.length);
+      var spd = Math.max(0, Math.round(speedKmh || 0));
+      $('spdVal').textContent = String(spd);
+      $('spdSub').textContent = acc ? ('±' + Math.round(acc) + 'm GPS') : 'live GPS';
+      if (pts.length % 4 === 0) lsSet(CFG.ACTIVE_KEY, active);
+    }
+
+    async function finishRide() {
+      if (finishing) return;
+      finishing = true;
+      var ride = active;
+      active = null;
+      recording = false;
+      lsDel(CFG.ACTIVE_KEY);
+      releaseWakeLock();
+      stopLiveUI();
+      updateButtons();
+
+      if (!ride || ride.pts.length < 2 || ride.rawKm < CFG.MIN_SAVE_KM) {
+        finishing = false;
+        updateButtons();
+        setStatus('Ready', 'green');
+        toast('Ride too short to save (need at least 30 m of movement).', 'warn');
+        return;
+      }
+
+      $('snapOverlay').classList.remove('hidden-i');
+      $('snapText').textContent = 'Snapping ' + ride.pts.length + ' points to bike paths…';
+      setStatus('Snapping', 'amber');
+
+      var result = await snapTrack(ride.pts, function (i, total) {
+        $('snapText').textContent = 'Matching segment ' + i + ' of ' + total + '…';
+      });
+
+      $('snapOverlay').classList.add('hidden-i');
+
+      var segs = result.segs.filter(function (s) { return s.length >= 2; });
+      if (!segs.length) segs = [ride.pts];
+      var km = segs.reduce(function (sum, s) { return sum + pathLenM(s) / 1000; }, 0);
+      if (km < CFG.MIN_SAVE_KM) km = ride.rawKm;
+
+      var newCovKm = 0;
+      segs.forEach(function (s) { newCovKm += coverSeg(s, cells); });
+      coverageKm += newCovKm;
+
+      var saved = {
+        id: 'c_' + Date.now(),
+        at: new Date().toISOString(),
+        dur: Math.round((Date.now() - ride.startedAt) / 1000),
+        km: km,
+        snapped: result.snapped,
+        segs: segs
+      };
+      data.rides.push(saved);
+      saveData();
+      drawRide(saved);
+      renderStats();
+
+      finishing = false;
+      updateButtons();
+      setStatus('Ready', 'green');
+      haptic([30, 50, 30]);
+
+      var newPct = (newCovKm / CFG.BASELINE_KM) * 100;
+      toast(
+        'Saved <strong>' + fmtKm(km) + ' km</strong>' +
+        (newCovKm > 0.005 ? ' · <strong class="text-emerald-300">+' + fmtPct(newPct) + '%</strong> new network coverage' : ' · already explored route') +
+        (result.snapped ? '' : ' (raw GPS)'),
+        'ok', 5200
+      );
+    }
+
+    function startRecording() {
+      if (!('geolocation' in navigator)) {
+        toast('Geolocation is not supported by this browser.', 'error');
+        return;
+      }
+      haptic(25);
+      recording = true;
+      active = { startedAt: Date.now(), pts: [], rawKm: 0 };
+      lsSet(CFG.ACTIVE_KEY, active);
+      requestWakeLock();
+      startLiveUI();
+      updateButtons();
+      setStatus('Acquiring GPS', 'amber');
+
+      var firstFix = true;
+      watchId = navigator.geolocation.watchPosition(
+        function (pos) {
+          if (!recording) return;
+          var c = pos.coords;
+          if (c.accuracy && c.accuracy > CFG.MAX_ACC_M && active.pts.length > 0) return;
+          if (firstFix) {
+            firstFix = false;
+            setStatus('Recording', 'red');
+            map.setView([c.latitude, c.longitude], Math.max(map.getZoom(), 15), { animate: true });
+          }
+          var kmh = (typeof c.speed === 'number' && !isNaN(c.speed) && c.speed >= 0) ? c.speed * 3.6 : 0;
+          pushPoint(c.latitude, c.longitude, kmh, c.accuracy);
+        },
+        function (err) {
+          if (!recording) return;
+          var msg = err.code === 1 ? 'Location permission denied. Allow GPS in Safari settings.'
+                  : err.code === 2 ? 'GPS signal unavailable — move outdoors for sky view.'
+                  : 'Waiting for GPS fix…';
+          setStatus(err.code === 1 ? 'GPS Blocked' : 'Searching GPS', 'amber');
+          toast(msg, err.code === 1 ? 'error' : 'warn');
+          if (err.code === 1) stopRecording();
+        },
+        { enableHighAccuracy: true, maximumAge: 1000, timeout: 15000 }
+      );
+    }
+
+    function stopRecording() {
+      if (watchId !== null) { navigator.geolocation.clearWatch(watchId); watchId = null; }
+      finishRide();
+    }
+
+    /* ================================================================
+       Event Bindings
+       ================================================================ */
+    $('btnRecord').addEventListener('click', function () {
+      if (recording) stopRecording(); else startRecording();
+    });
+
+    $('btnRidesList').addEventListener('click', function () {
+      haptic(15);
+      openRidesModal();
+    });
+
+    $('btnCloseRides').addEventListener('click', function () {
+      $('ridesModal').classList.add('hidden-i');
+    });
+
+    $('ridesModal').addEventListener('click', function (e) {
+      if (e.target === $('ridesModal')) $('ridesModal').classList.add('hidden-i');
+    });
+
+    $('btnFitAllModal').addEventListener('click', function () {
+      $('ridesModal').classList.add('hidden-i');
+      $('btnFit').click();
+    });
+
+    $('btnReset').addEventListener('click', async function () {
+      haptic(15);
+      var ok = await ask({
+        title: 'Reset all cycling progress?',
+        body: 'This permanently deletes all ' + data.rides.length + ' saved rides (' + fmtKm(totalKm()) + ' km) and resets your NParks + LTA network coverage to 0%.',
+        ok: 'Delete All',
+        danger: true
+      });
+      if (!ok) return;
+      data = { v: 1, rides: [], totalKm: 0 };
+      lsDel(CFG.STORE_KEY);
+      recomputeCoverage();
+      drawAllRides();
+      renderStats();
+      haptic([20, 40, 20]);
+      toast('All cycling history cleared.', 'warn');
+    });
+
+    // Toggle NParks PCN layer
+    $('toggleNparks').addEventListener('click', function () {
+      haptic(10);
+      prefs.showNparks = !prefs.showNparks;
+      this.dataset.on = String(prefs.showNparks);
+      lsSet(CFG.PREFS_KEY, prefs);
+      if (prefs.showNparks) nparksGroup.addTo(map); else map.removeLayer(nparksGroup);
+    });
+
+    // Toggle LTA Cycling Paths layer
+    $('toggleLta').addEventListener('click', function () {
+      haptic(10);
+      prefs.showLta = !prefs.showLta;
+      this.dataset.on = String(prefs.showLta);
+      lsSet(CFG.PREFS_KEY, prefs);
+      if (prefs.showLta) ltaGroup.addTo(map); else map.removeLayer(ltaGroup);
+    });
+
+    // Force re-sync live GeoJSON from data.gov.sg
+    $('btnRefreshDb').addEventListener('click', function () {
+      haptic(15);
+      toast('Syncing live GeoJSON from NParks & LTA…', 'info', 2500);
+      loadOfficialNetworks(true);
+    });
+
+    // Cycle SLA OneMap themes
+    $('btnLayers').addEventListener('click', function () {
+      haptic(10);
+      var next = TILE_ORDER[(TILE_ORDER.indexOf(prefs.tiles) + 1) % TILE_ORDER.length];
+      setTiles(next);
+      toast('Map: ' + TILES[next].name, 'info', 1800);
+    });
+
+    $('btnFit').addEventListener('click', function () {
+      haptic(10);
+      var pts = [];
+      data.rides.forEach(function (r) { r.segs.forEach(function (s) { s.forEach(function (p) { pts.push(p); }); }); });
+      if (!pts.length) return;
+      follow = false;
+      $('btnLocate').dataset.active = 'false';
+      map.fitBounds(L.latLngBounds(pts), { padding: [70, 70], maxZoom: 16 });
+    });
+
+    $('btnLocate').addEventListener('click', function () {
+      haptic(10);
+      if (active && active.pts.length) {
+        follow = true;
+        this.dataset.active = 'true';
+        map.setView(active.pts[active.pts.length - 1], Math.max(map.getZoom(), 15), { animate: true });
+        return;
+      }
+      if (!('geolocation' in navigator)) { toast('Geolocation unavailable.', 'error'); return; }
+      navigator.geolocation.getCurrentPosition(
+        function (pos) {
+          map.setView([pos.coords.latitude, pos.coords.longitude], 15, { animate: true });
+          updateUserMarker(pos.coords.latitude, pos.coords.longitude, pos.coords.accuracy);
+        },
+        function () { toast('Could not determine your location.', 'warn'); },
+        { enableHighAccuracy: true, timeout: 10000 }
+      );
+    });
+
+    map.on('dragstart', function () {
+      if (follow) { follow = false; $('btnLocate').dataset.active = 'false'; }
+    });
+
+    // Sync initial toggle pills state
+    $('toggleNparks').dataset.on = String(prefs.showNparks);
+    $('toggleLta').dataset.on = String(prefs.showLta);
+
+    /* ================================================================
+       Startup: Load Official Datasets & Recover Interrupted Rides
+       ================================================================ */
+    loadOfficialNetworks(false);
+
+    (async function recoverDraft() {
+      var draft = lsGet(CFG.ACTIVE_KEY, null);
+      lsDel(CFG.ACTIVE_KEY);
+      if (!draft || !Array.isArray(draft.pts) || draft.pts.length < 2 || (draft.rawKm || 0) < CFG.MIN_SAVE_KM) return;
+      var ok = await ask({
+        title: 'Recover interrupted cycling ride?',
+        body: 'Found an unsaved ' + fmtKm(draft.rawKm) + ' km ride (' + draft.pts.length + ' GPS points). Snap to cycling paths and save it now?',
+        ok: 'Recover & Save',
+        cancel: 'Discard'
+      });
+      if (!ok) return;
+      active = draft;
+      finishRide();
+    })();
+
+  })();
+  </script>
+</body>
+</html>
